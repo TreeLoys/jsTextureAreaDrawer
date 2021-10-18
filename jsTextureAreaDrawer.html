@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>JsTextureAreaDrawer</title>
+    <script src="vue.js"></script>
+    <style>
+        #textureAreaDrawer{
+            border: solid 1px black;
+        }
+        .controlPanel{
+            float: left;
+            width: 200px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="app">
+        <div class="controlPanel">
+            <canvas id="zoomCanvas"
+                    width="100"
+                    height="100"></canvas>
+            Мышь x: {{mouse.x}} y: {{mouse.y}}<br>
+            <button @click="startPath = !startPath">
+            Старт полигона <span v-if="startPath">Вкл.</span>
+                           <span v-else="startPath">Выкл.</span>
+            </button>
+        </div>
+        <div>
+            <center>
+                <canvas @click="mouseClick"
+                        @mousemove="mouseMove"
+                        id="textureAreaDrawer"
+                        width="512"
+                        height="512"></canvas>
+            </center>
+        </div>
+    </div>
+
+    <script>
+        // Точка
+        class Point{
+            x = null
+            y = null
+        }
+        var app;
+
+        var ctxZoomCanvas = document.getElementById("zoomCanvas").getContext("2d");
+
+        window.onload = function (e){
+            console.log("Init JsTextureAreaDrawer")
+            console.log("");
+                    app = new Vue({
+                    el: '#app',
+                    data: {
+                        beat: null,
+                        startPath: false,
+                        endPath: false,
+                        currentPoints: [],
+                        canvasElement: null,
+                        ctx: null,
+                        mouse: {
+                            x: 0,
+                            y: 0
+                        }
+                    },
+                    methods: {
+                        mouseMove(event){
+                            // Следит за правильными координатами относительно текстуры
+                            let rect = this.canvasElement.getBoundingClientRect();
+                            this.mouse.x = event.clientX - rect.left;
+                            this.mouse.y = event.clientY - rect.top;
+                        },
+                        mouseClick(){
+
+                        },
+                        drawNextPoint(){
+
+                        },
+                        drawMouseSupportPoint(){
+                            this.ctx.beginPath()
+                            this.ctx.fillStyle = "rgba(0,0,0, 0.1)"
+                            this.ctx.arc(this.mouse.x, this.mouse.y, 3, 0, 2 * Math.PI)
+                            this.ctx.fill()
+                        },
+                        drawSupportLine(){
+                            this.ctx.lineWidth = 1;
+                            // Первая горизонтальная
+                            this.ctx.fillStyle = "rgba(0,255,0, 0.3)";
+                            this.ctx.strokeStyle = "rgba(0,255,0, 0.3)";
+                            this.ctx.beginPath();
+                            this.ctx.moveTo(0, this.mouse.y);
+                            this.ctx.lineTo(512, this.mouse.y);
+                            this.ctx.stroke();
+                            // Вторая линия
+                            this.ctx.fillStyle = "rgba(0,0,255, 0.3)";
+                            this.ctx.strokeStyle = "rgba(0,0,255, 0.3)";
+                            this.ctx.beginPath();
+                            this.ctx.moveTo(this.mouse.x, 0);
+                            this.ctx.lineTo(this.mouse.x, 512);
+                            this.ctx.stroke();
+                        },
+                        drawZoomArea(){
+                             ctxZoomCanvas.drawImage(
+                                 this.canvasElement,
+                                 this.mouse.x - 25,
+                                 this.mouse.y - 25,
+                                 50,
+                                 50,
+                                 0,
+                                 0,
+                                 50,
+                                 50);
+                        },
+
+                        drawRectangleByPoints(){
+
+                        },
+
+                        update(){
+                            this.ctx.fillStyle = "#ffffff"
+                            this.ctx.fillRect(0,0, 512, 512)
+                            this.drawMouseSupportPoint()
+                            this.drawSupportLine()
+                            this.drawZoomArea()
+                        }
+                    },
+                    mounted(){
+
+                        this.canvasElement = document.getElementById("textureAreaDrawer");
+                        this.ctx = this.canvasElement.getContext("2d");
+                        if(this.beat === null){
+                            this.beat = setInterval(function (e) {
+                                this.update()
+                            }.bind(this), 1/30) // 30 FPS
+                        }
+                    }
+             })
+        };
+    </script>
+</body>
+</html>
