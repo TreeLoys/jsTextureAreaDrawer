@@ -4,6 +4,10 @@
     <meta charset="UTF-8">
     <title>JsTextureAreaDrawer</title>
     <script src="vue.js"></script>
+    <script src="three.min.js"></script>
+<!--    <script src="three.module.js"></script>-->
+    <script src="GLTFLoader.js"></script>
+    <script src="OrbitControls.min.js"></script>
     <style>
         #textureAreaDrawer{
             border: solid 1px black;
@@ -12,6 +16,15 @@
             float: left;
             width: 200px;
         }
+        #zoomCanvas{
+            z-index: 3;
+            border: 1px solid;
+        }
+        #d3View{
+            width: 512px;
+            height: 512px;
+            float: left;
+        }
     </style>
 </head>
 <body>
@@ -19,124 +32,313 @@
     <div id="app">
         <div class="controlPanel">
             <canvas id="zoomCanvas"
-                    width="100"
-                    height="100"></canvas>
-            Мышь x: {{mouse.x}} y: {{mouse.y}}<br>
-            <button @click="startPath = !startPath">
-            Старт полигона <span v-if="startPath">Вкл.</span>
-                           <span v-else="startPath">Выкл.</span>
-            </button>
+                    width="250"
+                    height="250"></canvas>
+            <br>
+            Мышь <br>x: {{mouse.x}}<br>y: {{mouse.y}}<br>
+            UV alpha {{imageUVAlpha}}: <input v-model="imageUVAlpha" type="range" min="0" max="1" step="0.01"> <br>
+            <p>
+                <label for="namePolygon">Имя полигона</label>
+                <input id="namePolygon" type="text" v-model="nameCurrentPolygon">
+                <button  @click="createPolygon">Создать полигон</button>
+            </p>
+            <p>
+                Текущие точки:
+                <table border="1px">
+                    <tr>
+                        <th>X: </th>
+                        <th>Y: </th>
+                        <th>Del</th>
+                    </tr>
+                    <tr v-for="(point, index) in rawPoints">
+                        <td><input v-model="point.x" type="number"  min="-9999" max="9999"></td>
+                        <td><input v-model="point.y" type="number"  min="-9999" max="9999"></td>
+                        <td><button @click="deleteRawPoint(index)">x</button></td>
+                    </tr>
+                </table>
+            </p>
+            <p>
+                Текущие полигоны:
+                <div v-for="(polygon, index) in polygons" :style="'background-color:'+ polygon.color">
+                    id:{{index}} name:{{polygon.name}}
+                </div>
+            </p>
+            <p><button @click="downloadPolygons">Скачать json полигоны</button></p>
         </div>
         <div>
-            <center>
+            <center style="float: left;margin-left: 61px;">
                 <canvas @click="mouseClick"
                         @mousemove="mouseMove"
                         id="textureAreaDrawer"
                         width="512"
                         height="512"></canvas>
             </center>
+            <div id="d3View"></div>
         </div>
     </div>
 
     <script>
         // Точка
         class Point{
-            x = null
-            y = null
+            constructor(x, y) {
+                this.x = x
+                this.y = y
+            }
+        }
+        function getRandomColor() {
+            return Math.floor(Math.random() * 255)
+        }
+        // Полигон
+        class Polygon{
+            constructor(name, points) {
+                this.name = name
+                this.points = points
+                this.color = "rgba(100, " +getRandomColor()+ ", "+getRandomColor()+", 0.7)"
+            }
+        }
+        // Загрузка файла
+        function download(content, fileName, contentType) {
+            var a = document.createElement("a");
+            var file = new Blob([content], {type: contentType});
+            a.href = URL.createObjectURL(file);
+            a.download = fileName;
+            a.click();
         }
         var app;
 
-        var ctxZoomCanvas = document.getElementById("zoomCanvas").getContext("2d");
+        var elemZoomCanvas = null;
+        var ctxZoomCanvas = null;
 
         window.onload = function (e){
             console.log("Init JsTextureAreaDrawer")
             console.log("");
-                    app = new Vue({
-                    el: '#app',
-                    data: {
-                        beat: null,
-                        startPath: false,
-                        endPath: false,
-                        currentPoints: [],
-                        canvasElement: null,
-                        ctx: null,
-                        mouse: {
-                            x: 0,
-                            y: 0
-                        }
-                    },
-                    methods: {
-                        mouseMove(event){
-                            // Следит за правильными координатами относительно текстуры
-                            let rect = this.canvasElement.getBoundingClientRect();
-                            this.mouse.x = event.clientX - rect.left;
-                            this.mouse.y = event.clientY - rect.top;
-                        },
-                        mouseClick(){
+            app = new Vue({
+            el: '#app',
+            data: {
+                beat: null,
+                canvasElement: null,
+                elemZoomCanvas: null,
+                ctx: null,
+                ctxZoomCanvas: null,
+                mouse: {
+                    x: 0,
+                    y: 0
+                },
+                imageUVAlpha: 0.9,
+                imageUVElement: null,
+                // Логика полигонов
+                rawPoints: [],
+                polygons: [],
+                nameCurrentPolygon: "polygon",
+                legsModel: null
+            },
+            methods: {
+                mouseMove(event){
+                    // Следит за правильными координатами относительно текстуры
+                    let rect = this.canvasElement.getBoundingClientRect();
+                    this.mouse.x = parseInt(event.clientX - rect.left);
+                    this.mouse.y = parseInt(event.clientY - rect.top);
+                },
+                mouseClick(){
+                    this.rawPoints.push(new Point(this.mouse.x, this.mouse.y))
+                },
+                drawNextPoint(){
 
-                        },
-                        drawNextPoint(){
+                },
+                drawMouseSupportPoint(){
+                    this.ctx.beginPath()
+                    this.ctx.fillStyle = "rgba(0,0,0, 0.1)"
+                    this.ctx.arc(this.mouse.x, this.mouse.y, 3, 0, 2 * Math.PI)
+                    this.ctx.fill()
+                },
+                drawSupportLine(){
+                    this.ctx.lineWidth = 0.5;
+                    // Первая горизонтальная
+                    this.ctx.fillStyle = "rgba(0,255,0, 0.3)";
+                    this.ctx.strokeStyle = "rgba(0,255,0, 0.3)";
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(0, this.mouse.y+0.5);
+                    this.ctx.lineTo(512, this.mouse.y+0.5);
+                    this.ctx.stroke();
+                    // Вторая линия
+                    this.ctx.fillStyle = "rgba(0,0,255, 0.3)";
+                    this.ctx.strokeStyle = "rgba(0,0,255, 0.3)";
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(this.mouse.x+0.5, 0);
+                    this.ctx.lineTo(this.mouse.x+0.5, 512);
+                    this.ctx.stroke();
+                },
+                drawZoomArea(){
+                     this.ctxZoomCanvas.fillStyle = "#ffffff"
+                     this.ctxZoomCanvas.fillRect(0,0,50,50)
+                     this.ctxZoomCanvas.drawImage(
+                         this.canvasElement,
+                         this.mouse.x - 25,
+                         this.mouse.y - 25,
+                         50,
+                         50,
+                         0,
+                         0,
+                         50,
+                         50);
+                },
 
-                        },
-                        drawMouseSupportPoint(){
-                            this.ctx.beginPath()
-                            this.ctx.fillStyle = "rgba(0,0,0, 0.1)"
-                            this.ctx.arc(this.mouse.x, this.mouse.y, 3, 0, 2 * Math.PI)
-                            this.ctx.fill()
-                        },
-                        drawSupportLine(){
-                            this.ctx.lineWidth = 1;
-                            // Первая горизонтальная
-                            this.ctx.fillStyle = "rgba(0,255,0, 0.3)";
-                            this.ctx.strokeStyle = "rgba(0,255,0, 0.3)";
-                            this.ctx.beginPath();
-                            this.ctx.moveTo(0, this.mouse.y);
-                            this.ctx.lineTo(512, this.mouse.y);
-                            this.ctx.stroke();
-                            // Вторая линия
-                            this.ctx.fillStyle = "rgba(0,0,255, 0.3)";
-                            this.ctx.strokeStyle = "rgba(0,0,255, 0.3)";
-                            this.ctx.beginPath();
-                            this.ctx.moveTo(this.mouse.x, 0);
-                            this.ctx.lineTo(this.mouse.x, 512);
-                            this.ctx.stroke();
-                        },
-                        drawZoomArea(){
-                             ctxZoomCanvas.drawImage(
-                                 this.canvasElement,
-                                 this.mouse.x - 25,
-                                 this.mouse.y - 25,
-                                 50,
-                                 50,
-                                 0,
-                                 0,
-                                 50,
-                                 50);
-                        },
-
-                        drawRectangleByPoints(){
-
-                        },
-
-                        update(){
-                            this.ctx.fillStyle = "#ffffff"
-                            this.ctx.fillRect(0,0, 512, 512)
-                            this.drawMouseSupportPoint()
-                            this.drawSupportLine()
-                            this.drawZoomArea()
-                        }
-                    },
-                    mounted(){
-
-                        this.canvasElement = document.getElementById("textureAreaDrawer");
-                        this.ctx = this.canvasElement.getContext("2d");
-                        if(this.beat === null){
-                            this.beat = setInterval(function (e) {
-                                this.update()
-                            }.bind(this), 1/30) // 30 FPS
-                        }
+                drawRawPointsPolygon(){
+                    if (this.rawPoints.length > 0){
+                        this.ctx.fillStyle = "rgba(200,0,0,0.7)"
+                        this.ctx.beginPath()
+                        this.ctx.moveTo(this.rawPoints[0].x, this.rawPoints[0].y)
+                        this.rawPoints.forEach(function (value) {
+                            this.ctx.lineTo(value.x, value.y)
+                        }.bind(this))
+                        this.ctx.closePath()
+                        this.ctx.fill()
                     }
-             })
+                },
+                drawRawPolygons(){
+                    this.polygons.forEach(function (item) {
+                        if (item.points.length > 0){
+                            this.ctx.fillStyle = item.color
+                            this.ctx.beginPath()
+                            this.ctx.moveTo(item.points[0].x, item.points[0].y)
+                            item.points.forEach(function (value) {
+                                this.ctx.lineTo(value.x, value.y)
+                            }.bind(this))
+                            this.ctx.closePath()
+                            this.ctx.fill()
+                        }
+                    }.bind(this))
+                },
+                loadImageUV(){
+                    var img = document.createElement('img');
+                    img.src = "UVmap/grandcalias.004.png";
+                    img.onload = function () {
+                        this.imageUVElement = img
+                        this.imageUVAlpha = 0.91
+                    }.bind(this)
+
+                },
+                drawUVLayer(){
+                    let debugCanvasUVAlpha = document.getElementById("debugCanvasUVAlpha")
+                        if (debugCanvasUVAlpha){
+                            this.ctx.drawImage(debugCanvasUVAlpha, 0, 0);
+                        }
+                },
+                createPolygon(){
+                    this.polygons.push(new Polygon(this.nameCurrentPolygon, this.rawPoints))
+                    this.rawPoints = []
+                },
+                deleteRawPoint(index){
+                    this.rawPoints.splice(index, 1)
+                },
+                update(){
+                    this.ctx.fillStyle = "#ffffff"
+                    this.ctx.fillRect(0,0, 512, 512)
+                    this.drawUVLayer()
+                    //this.drawMouseSupportPoint()
+                    this.drawSupportLine()
+                    this.drawRawPointsPolygon()
+                    this.drawRawPolygons()
+                    this.setLegsTemparatureTexture()
+                    //end
+                    this.drawZoomArea()
+
+                },
+                downloadPolygons(){
+                    download(JSON.stringify(this.polygons), "polygonsMap.json", "text/plain")
+                },
+                setLegsTemparatureTexture(){
+                  var texture = new THREE.CanvasTexture(this.canvasElement)
+                    texture.flipY = false;
+                  this.legsModel.scene.traverse(function ( child ) {
+                    if (child instanceof THREE.Mesh) {
+                        child.material.map = texture;
+                        child.material.needsUpdate = true;
+                        child.material.map.needsUpdate = true;
+                      }
+                  });
+                },
+                init3d(){
+
+                    const scene = new THREE.Scene();
+                    const camera = new THREE.PerspectiveCamera( 75, 512 / 512, 0.1, 1000 );
+                    const renderer = new THREE.WebGLRenderer({antialias: true});
+                    renderer.setSize( 512, 512 );
+                    renderer.setClearColor( 0xcccccc );
+
+                    document.getElementById("d3View").appendChild( renderer.domElement );
+
+                    const light = new THREE.AmbientLight( 0xffffff, 1 );
+                    scene.add( light );
+                    camera.position.z = 1;
+                    const controls = new THREE.OrbitControls(camera, renderer.domElement );
+
+                    this.renderer = renderer
+                    this.scene = scene
+                    this.camera = camera
+
+                    const gltfLoader = new THREE.GLTFLoader();
+                    gltfLoader.load( 'ModelsGLTF/legs.glb', function ( gltf ) {
+                          this.legsModel = gltf;
+                          console.log(this.legsModel);
+                          this.legsModel.scene.position.y = -0.5
+                          this.scene.add( this.legsModel.scene );
+                      }.bind(this), undefined, function ( error ) {
+                        console.error( error );
+                      } );
+                    const animate = function () {
+                        console.log("animate")
+                        requestAnimationFrame( animate );
+                        // this.cube.rotation.y += 0.01;
+                        this.legsModel.scene.rotation.y += 0.01;
+                        this.renderer.render( this.scene, this.camera );
+                    }.bind(this);
+
+                    animate();
+
+                }
+            },
+            watch: {
+                imageUVAlpha(oldVal, newVal){
+                    if (this.imageUVElement != null){
+                        var localCanvas = document.createElement('canvas');
+                        localCanvas.setAttribute("id", "debugCanvasUVAlpha");
+                        localCanvas.setAttribute("width", 512);
+                        localCanvas.setAttribute("height", 512);
+                        localCanvas.setAttribute("style", "border: 1px solid #000000; display: none;");
+                        var localCtx = localCanvas.getContext("2d");
+                        localCtx.globalAlpha = newVal;
+                        localCtx.drawImage(this.imageUVElement, 0, 0);
+                        // debug
+                        let debugCanvasUVAlpha = document.getElementById("debugCanvasUVAlpha")
+                        if (debugCanvasUVAlpha){
+                            debugCanvasUVAlpha.remove()
+                        }
+                        document.body.appendChild(localCanvas);
+                    }
+                }
+            },
+            mounted(){
+                this.canvasElement = document.getElementById("textureAreaDrawer");
+                this.ctx = this.canvasElement.getContext("2d");
+                this.ctx.imageSmoothingEnabled = false;
+                // Инициирование zoomCanvas елемента
+                this.elemZoomCanvas = document.getElementById("zoomCanvas");
+                this.ctxZoomCanvas = this.elemZoomCanvas.getContext("2d");
+                this.ctxZoomCanvas.scale(5, 5);
+                this.ctxZoomCanvas.imageSmoothingEnabled = false;
+                //
+                this.loadImageUV()
+                if(this.beat === null){
+                    this.beat = setInterval(function (e) {
+                        this.update()
+                    }.bind(this), 1/30) // 30 FPS
+                }
+                //3d
+                //init3DView()
+                this.init3d()
+            }
+         })
         };
     </script>
 </body>
